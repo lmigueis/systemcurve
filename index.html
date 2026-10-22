@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HydroCurve Pro | SciPy Hydraulic System Curve Calculator</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS (Excel Export) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Pyodide Core -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+
+    <!-- Top Loading Overlay for Pyodide Initialization -->
+    <div id="pyodideLoader" class="fixed inset-0 bg-slate-950/90 z-50 flex flex-col items-center justify-center p-6 text-center backdrop-blur-sm transition-opacity duration-300">
+        <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full spin mb-4"></div>
+        <h2 class="text-xl font-bold text-slate-100 mb-2">Initializing Python CPython & SciPy Engine...</h2>
+        <p class="text-sm text-slate-400 max-w-md">Loading NumPy, SciPy, and the Colebrook-White root-finding solvers into WebAssembly memory.</p>
+        <span id="pyodideStatus" class="mt-4 px-3 py-1 bg-slate-800 rounded-full text-xs font-mono text-blue-400 border border-slate-700">Bootstrapping Pyodide runtime...</span>
+    </div>
+
+    <!-- Header Navigation -->
+    <header class="bg-slate-800/90 border-b border-slate-700 px-6 py-4 flex flex-wrap justify-between items-center gap-4 sticky top-0 z-40 backdrop-blur">
+        <div>
+            <h1 class="text-xl font-bold text-blue-400 flex items-center gap-2">
+                <span>⚙️</span> HydroCurve Pro
+                <span class="text-xs bg-blue-900/60 text-blue-300 border border-blue-700/50 px-2 py-0.5 rounded font-mono">SciPy Wasm v2.0</span>
+            </h1>
+            <p class="text-xs text-slate-400">Atomized Bernoulli Line Losses • Implicit Colebrook-White • Dynamic Crane TP-410 Reducers & Fittings</p>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <div class="flex items-center bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 text-sm">
+                <span class="text-slate-400 mr-2 text-xs uppercase tracking-wide">Output Display Units:</span>
+                <select id="unitSystem" onchange="app.toggleUnits()" class="bg-slate-900 text-blue-400 font-semibold focus:outline-none cursor-pointer">
+                    <option value="metric">Metric (m³/h, m Head)</option>
+                    <option value="imperial">Imperial (US GPM, ft Head)</option>
+                </select>
+            </div>
+            <button onclick="app.exportToExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition flex items-center gap-1.5 shadow">
+                <span>📊</span> Export Excel Workbook
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Grid Workspace -->
+    <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 max-w-[1800px] mx-auto w-full">
+
+        <!-- Sidebar: Fluid & Boundary Conditions -->
+        <div class="lg:col-span-3 space-y-6">
+            
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg space-y-4">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-700 pb-2">1. Fluid & Operating Conditions</h2>
+                
+                <div>
+                    <label class="block text-slate-300 text-xs mb-1">Fluid Preset</label>
+                    <select id="fluidPreset" onchange="app.updateFluidPreset()" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200">
+                        <option value="water20">Water (20°C / 68°F)</option>
+                        <option value="water60">Water (60°C / 140°F)</option>
+                        <option value="acid98">Sulphuric Acid (98%, 30°C)</option>
+                        <option value="oil_iso46">Coating / Hydraulic Oil (ISO VG 46)</option>
+                        <option value="custom">Custom Liquid Properties</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Density (kg/m³)</label>
+                        <input type="number" id="fluidDensity" value="998.2" step="0.1" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Viscosity (cP)</label>
+                        <input type="number" id="fluidViscosity" value="1.002" step="0.001" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Vapor Press. (kPa a)</label>
+                        <input type="number" id="vaporPressure" value="2.34" step="0.01" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Atm. Press. (kPa a)</label>
+                        <input type="number" id="atmPressure" value="101.3" step="0.1" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-700 pt-3 space-y-3">
+                    <div>
+                        <label class="block text-blue-300 font-semibold text-xs mb-1">Design Duty Flow (<span class="flowUnitLabel">m³/h</span>)</label>
+                        <input type="number" id="qDesign" value="100" step="1" onchange="app.recalculate()" class="w-full bg-slate-900 border border-blue-500/60 rounded p-2 text-blue-200 font-bold text-sm">
+                        <span class="text-[10px] text-slate-400">Used to display individual row head losses in tables.</span>
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-300 text-xs mb-1">Curve Flow Range (<span class="flowUnitLabel">m³/h</span>)</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Min</span>
+                                <input type="number" id="qMin" value="0" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 text-center text-sm">
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Max</span>
+                                <input type="number" id="qMax" value="150" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 text-center text-sm">
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-slate-500 uppercase">Steps</span>
+                                <input type="number" id="qSteps" value="16" min="2" max="100" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 text-center text-sm">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3 pt-2 text-xs border-t border-slate-700">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Suction Static z_s (m)</label>
+                        <input type="number" id="suctionElevation" value="2.0" step="0.1" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Discharge Static z_d (m)</label>
+                        <input type="number" id="dischargeElevation" value="18.5" step="0.1" onchange="app.recalculate()" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-slate-200">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operating Summary Card -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg space-y-3">
+                <h2 class="text-xs font-bold text-blue-400 uppercase tracking-wider border-b border-slate-700 pb-2">Duty Point Snapshot (@ Q_design)</h2>
+                <div id="summaryResults" class="space-y-2 text-sm text-slate-300">
+                    <p class="text-xs text-slate-400 italic">Calculating system state with SciPy...</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Content: Interactive Pipeline Builders & Chart Output -->
+        <div class="lg:col-span-9 space-y-6 flex flex-col">
+
+            <!-- Tab Buttons -->
+            <div class="flex flex-wrap border-b border-slate-700 gap-2">
+                <button onclick="app.switchTab('suction')" id="tabBtnSuction" class="px-5 py-2.5 font-semibold text-sm border-b-2 border-blue-500 text-blue-400 bg-slate-800/60 rounded-t-lg transition">
+                    1. Suction Line Builder (<span id="suctionLossBadge">0.00 m</span>)
+                </button>
+                <button onclick="app.switchTab('discharge')" id="tabBtnDischarge" class="px-5 py-2.5 font-semibold text-sm border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition">
+                    2. Discharge Line Builder (<span id="dischargeLossBadge">0.00 m</span>)
+                </button>
+                <button onclick="app.switchTab('plot')" id="tabBtnPlot" class="px-5 py-2.5 font-semibold text-sm border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition">
+                    3. System Curve & Full Table
+                </button>
+            </div>
+
+            <!-- Tab Content 1 & 2: Pipe and Fitting Tables -->
+            <div id="tabContentLines" class="space-y-6 flex-1">
+                
+                <!-- Pipe Segments Table -->
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <div>
+                            <h3 id="lineTitle" class="text-xs font-bold text-blue-400 uppercase tracking-wider">Suction Line Pipe Segments</h3>
+                            <p class="text-[11px] text-slate-400">Individual friction losses evaluated at Design Flow (<span class="designFlowReadout">100 m³/h</span>)</p>
+                        </div>
+                        <button onclick="app.addSegment()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-xs font-semibold transition flex items-center gap-1 shadow">
+                            <span>+</span> Add Pipe Segment
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900/90 text-slate-400 border-b border-slate-700">
+                                <tr>
+                                    <th class="p-2.5">Segment Tag</th>
+                                    <th class="p-2.5">Nominal Size</th>
+                                    <th class="p-2.5">Schedule</th>
+                                    <th class="p-2.5">Material</th>
+                                    <th class="p-2.5">Length (m)</th>
+                                    <th class="p-2.5 text-right text-slate-300">ID (mm)</th>
+                                    <th class="p-2.5 text-right text-slate-300">Vel (m/s)</th>
+                                    <th class="p-2.5 text-right text-slate-300">Friction (f)</th>
+                                    <th class="p-2.5 text-right text-blue-300">Head Loss (<span class="headUnitLabel">m</span>)</th>
+                                    <th class="p-2.5 text-center">Del</th>
+                                </tr>
+                            </thead>
+                            <tbody id="segmentTableBody" class="divide-y divide-slate-700/50 font-mono">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Fittings, Reducers & Valves Table -->
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <div>
+                            <h3 id="fittingTitle" class="text-xs font-bold text-purple-400 uppercase tracking-wider">Suction Line Fittings, Valves, Reducers & Bellows</h3>
+                            <p class="text-[11px] text-slate-400">For reducers/expanders, select both Inlet Size (NPS 1) and Outlet Size (NPS 2) to auto-compute K.</p>
+                        </div>
+                        <button onclick="app.addFitting()" class="bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded text-xs font-semibold transition flex items-center gap-1 shadow">
+                            <span>+</span> Add Fitting / Valve / Reducer
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900/90 text-slate-400 border-b border-slate-700">
+                                <tr>
+                                    <th class="p-2.5">Fitting Tag</th>
+                                    <th class="p-2.5">Component Type</th>
+                                    <th class="p-2.5">Inlet Size (NPS 1)</th>
+                                    <th class="p-2.5">Outlet Size (NPS 2)</th>
+                                    <th class="p-2.5">Sched</th>
+                                    <th class="p-2.5 text-center">Qty</th>
+                                    <th class="p-2.5 text-right text-slate-300">Vel (m/s)</th>
+                                    <th class="p-2.5 text-right text-slate-300">Total K</th>
+                                    <th class="p-2.5 text-right text-purple-300">Head Loss (<span class="headUnitLabel">m</span>)</th>
+                                    <th class="p-2.5 text-center">Del</th>
+                                </tr>
+                            </thead>
+                            <tbody id="fittingTableBody" class="divide-y divide-slate-700/50 font-mono">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Tab Content 3: Plot and Complete Breakdown -->
+            <div id="tabContentPlot" class="hidden space-y-6 flex-1">
+                
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Hydraulic System Curve (Bernoulli Solution via SciPy)</h3>
+                        <span id="plotUnitSubtitle" class="text-xs text-slate-400 font-mono">Flow: m³/h | Head: Meters</span>
+                    </div>
+                    <div class="h-[430px] w-full relative">
+                        <canvas id="systemCurveChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Mathematical Breakdown Table -->
+                <div class="bg-slate-800 border border-slate-700 rounded-xl p-5 shadow-lg">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Complete Itemized Loss Breakdown (@ Design Flow)</h3>
+                        <span class="text-xs text-blue-400 font-mono designFlowReadout">100 m³/h</span>
+                    </div>
+                    <div class="overflow-x-auto max-h-[340px]">
+                        <table class="w-full text-left text-xs">
+                            <thead class="bg-slate-900 text-slate-400 border-b border-slate-700 sticky top-0">
+                                <tr>
+                                    <th class="p-2.5">Section</th>
+                                    <th class="p-2.5">Component Tag & Details</th>
+                                    <th class="p-2.5 text-right">Ref ID (mm)</th>
+                                    <th class="p-2.5 text-right">Velocity (m/s)</th>
+                                    <th class="p-2.5 text-right">Reynolds (Re)</th>
+                                    <th class="p-2.5 text-right">f / K_total</th>
+                                    <th class="p-2.5 text-right">Major Loss (<span class="headUnitLabel">m</span>)</th>
+                                    <th class="p-2.5 text-right">Minor Loss (<span class="headUnitLabel">m</span>)</th>
+                                    <th class="p-2.5 text-right text-emerald-300">Total Item Loss (<span class="headUnitLabel">m</span>)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="breakdownTableBody" class="divide-y divide-slate-700/50 font-mono">
+                                <!-- Populated dynamically from Python result -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Embedded SciPy Hydraulic Computation Engine -->
+    <script type="text/python" id="python_engine">
+import numpy as np
+from scipy.optimize import root_scalar
+import json
+
+def colebrook_white_implicit(f, eps_over_d, Re):
+    return 1.0 / np.sqrt(f) + 2.0 * np.log10(eps_over_d / 3.7 + 2.51 / (Re * np.sqrt(f)))
+
+def calculate_friction_factor(roughness_m, diameter_m, reynolds):
+    if reynolds <= 1e-3:
+        return 0.0
+    if reynolds < 2000.0:
+        return 64.0 / reynolds
+    
+    eps_over_d = roughness_m / diameter_m
+    f_haaland = (-1.8 * np.log10((eps_over_d / 3.7)**1.11 + 6.9 / reynolds))**(-2)
+
+    if 2000.0 <= reynolds <= 4000.0:
+        f_lam = 64.0 / 2000.0
+        sol_4k = root_scalar(
+            colebrook_white_implicit,
+            args=(eps_over_d, 4000.0),
+            bracket=[0.005, 0.12],
+            method='brentq'
+        )
+        f_turb = sol_4k.root if sol_4k.converged else f_haaland
+        return float(f_lam + (f_turb - f_lam) * ((reynolds - 2000.0) / 2000.0))
+
+    bracket = [max(0.004, f_haaland * 0.4), min(0.15, f_haaland * 1.6)]
+    res = root_scalar(
+        colebrook_white_implicit,
+        args=(eps_over_d, reynolds),
+        bracket=bracket,
+        method='brentq',
+        xtol=1e-12,
+        rtol=1e-12
+    )
+    return float(res.root) if res.converged else float(f_haaland)
+
+def compute_fitting_k(fit_type, base_k, d1_mm, d2_mm):
+    """
+    Computes exact K factor for reductions and expansions based on diameter ratio beta,
+    referenced to the smaller pipe diameter velocity head (Crane TP-410 convention).
+    """
+    d_small = min(d1_mm, d2_mm)
+    d_large = max(d1_mm, d2_mm)
+    beta = d_small / max(d_large, 1e-6)
+    beta2 = beta ** 2
+
+    if fit_type == "Concentric Reducer (Contraction)":
+        # Gradual contraction (~30 deg cone)
+        return 0.20 * (1.0 - beta2), d_small
+    elif fit_type == "Sudden Contraction":
+        # Crane TP-410 sudden contraction
+        return 0.50 * (1.0 - beta2), d_small
+    elif fit_type == "Gradual Expansion (Increaser)":
+        # Diffuser / gradual enlargement
+        return 0.65 * ((1.0 - beta2) ** 2), d_small
+    elif fit_type == "Sudden Enlargement":
+        # Borda-Carnot sudden expansion equation
+        return (1.0 - beta2) ** 2, d_small
+    else:
+        return base_k, d1_mm
+
+def evaluate_flow_point(q_m3h, cfg, rho, nu, z_s, z_d, h_atm, h_vap):
+    g = 9.80665
+    q_m3s = q_m3h / 3600.0
+    suction_hf = 0.0
+    suction_hm = 0.0
+    discharge_hf = 0.0
+    discharge_hm = 0.0
+
+    suction_seg_res = []
+    suction_fit_res = []
+    discharge_seg_res = []
+    discharge_fit_res = []
+    breakdown = []
+    max_suction_vel = 0.0
+
+    # 1. Suction Pipe Segments
+    for seg in cfg['suction_lines']:
+        d_mm = float(seg['id_mm'])
+        d = d_mm * 1e-3
+        area = np.pi * (d / 2.0)**2
+        vel = q_m3s / max(area, 1e-8)
+        if vel > max_suction_vel:
+            max_suction_vel = vel
+        Re = (vel * d) / max(nu, 1e-9)
+        f = calculate_friction_factor(seg['roughness_mm'] * 1e-3, d, Re)
+        hf = f * (seg['length_m'] / d) * (vel**2 / (2.0 * g))
+        suction_hf += hf
+        row_data = {
+            'id': seg['id'], 'section': 'Suction Pipe', 'component': seg['tag'],
+            'id_mm': d_mm, 'vel': float(vel), 'Re': float(Re),
+            'f': float(f), 'K_total': None, 'major': float(hf), 'minor': 0.0, 'loss': float(hf)
+        }
+        suction_seg_res.append(row_data)
+        breakdown.append(row_data)
+
+    # 2. Suction Fittings
+    for fit in cfg['suction_fittings']:
+        k_single, ref_d_mm = compute_fitting_k(fit['type'], float(fit['base_K']), float(fit['id1_mm']), float(fit['id2_mm']))
+        d = ref_d_mm * 1e-3
+        area = np.pi * (d / 2.0)**2
+        vel = q_m3s / max(area, 1e-8)
+        k_tot = k_single * int(fit['qty'])
+        hm = k_tot * (vel**2 / (2.0 * g))
+        suction_hm += hm
+        row_data = {
+            'id': fit['id'], 'section': 'Suction Fitting', 'component': f"{fit['tag']} ({fit['type']} x{fit['qty']})",
+            'id_mm': float(ref_d_mm), 'vel': float(vel), 'Re': None,
+            'f': None, 'K_total': float(k_tot), 'major': 0.0, 'minor': float(hm), 'loss': float(hm)
+        }
+        suction_fit_res.append(row_data)
+        breakdown.append(row_data)
+
+    # 3. Discharge Pipe Segments
+    for seg in cfg['discharge_lines']:
+        d_mm = float(seg['id_mm'])
+        d = d_mm * 1e-3
+        area = np.pi * (d / 2.0)**2
+        vel = q_m3s / max(area, 1e-8)
+        Re = (vel * d) / max(nu, 1e-9)
+        f = calculate_friction_factor(seg['roughness_mm'] * 1e-3, d, Re)
+        hf = f * (seg['length_m'] / d) * (vel**2 / (2.0 * g))
+        discharge_hf += hf
+        row_data = {
+            'id': seg['id'], 'section': 'Discharge Pipe', 'component': seg['tag'],
+            'id_mm': d_mm, 'vel': float(vel), 'Re': float(Re),
+            'f': float(f), 'K_total': None, 'major': float(hf), 'minor': 0.0, 'loss': float(hf)
+        }
+        discharge_seg_res.append(row_data)
+        breakdown.append(row_data)
+
+    # 4. Discharge Fittings
+    for fit in cfg['discharge_fittings']:
+        k_single, ref_d_mm = compute_fitting_k(fit['type'], float(fit['base_K']), float(fit['id1_mm']), float(fit['id2_mm']))
+        d = ref_d_mm * 1e-3
+        area = np.pi * (d / 2.0)**2
+        vel = q_m3s / max(area, 1e-8)
+        k_tot = k_single * int(fit['qty'])
+        hm = k_tot * (vel**2 / (2.0 * g))
+        discharge_hm += hm
+        row_data = {
+            'id': fit['id'], 'section': 'Discharge Fitting', 'component': f"{fit['tag']} ({fit['type']} x{fit['qty']})",
+            'id_mm': float(ref_d_mm), 'vel': float(vel), 'Re': None,
+            'f': None, 'K_total': float(k_tot), 'major': 0.0, 'minor': float(hm), 'loss': float(hm)
+        }
+        discharge_fit_res.append(row_data)
+        breakdown.append(row_data)
+
+    static_head = z_d - z_s
+    suction_total = suction_hf + suction_hm
+    discharge_total = discharge_hf + discharge_hm
+    friction_loss = suction_total + discharge_total
+    tdh = static_head + friction_loss
+    npsha = h_atm - h_vap + z_s - suction_total
+
+    return {
+        'q_m3h': float(q_m3h),
+        'static_head': float(static_head),
+        'suction_loss': float(suction_total),
+        'discharge_loss': float(discharge_total),
+        'friction_loss': float(friction_loss),
+        'tdh': float(tdh),
+        'npsha': float(npsha),
+        'max_suction_vel': float(max_suction_vel),
+        'suction_seg_res': suction_seg_res,
+        'suction_fit_res': suction_fit_res,
+        'discharge_seg_res': discharge_seg_res,
+        'discharge_fit_res': discharge_fit_res,
+        'breakdown': breakdown
+    }
+
+def run_simulation(config_json_str):
+    cfg = json.loads(config_json_str)
+    fluid = cfg['fluid']
+    
+    g = 9.80665
+    rho = float(fluid['density'])
+    mu = float(fluid['viscosity_cp']) * 1e-3
+    nu = mu / rho
+
+    z_s = float(cfg['suction_elevation'])
+    z_d = float(cfg['discharge_elevation'])
+
+    p_atm_pa = float(fluid['atm_kpa']) * 1e3
+    p_vap_pa = float(fluid['vap_kpa']) * 1e3
+    h_atm = p_atm_pa / (rho * g)
+    h_vap = p_vap_pa / (rho * g)
+
+    q_series = np.linspace(float(cfg['q_min']), float(cfg['q_max']), int(cfg['q_steps']))
+    curve_points = [evaluate_flow_point(q, cfg, rho, nu, z_s, z_d, h_atm, h_vap) for q in q_series]
+    design_point = evaluate_flow_point(float(cfg['q_design']), cfg, rho, nu, z_s, z_d, h_atm, h_vap)
+
+    return json.dumps({
+        'curve': curve_points,
+        'design': design_point
+    })
+    </script>
+
+    <!-- Application Orchestrator Script -->
+    <script>
+        // Clean keys without raw double-quotes to prevent HTML attribute breaking
+        const PIPE_SCHEDULES = {
+            "DN25 (1 in)":   { "SCH 10": 27.9,  "SCH 40": 26.6,  "SCH 80": 24.3 },
+            "DN40 (1.5 in)": { "SCH 10": 42.7,  "SCH 40": 40.9,  "SCH 80": 38.1 },
+            "DN50 (2 in)":   { "SCH 10": 54.8,  "SCH 40": 52.5,  "SCH 80": 49.3 },
+            "DN65 (2.5 in)": { "SCH 10": 66.9,  "SCH 40": 62.7,  "SCH 80": 59.0 },
+            "DN80 (3 in)":   { "SCH 10": 82.8,  "SCH 40": 77.9,  "SCH 80": 73.7 },
+            "DN100 (4 in)":  { "SCH 10": 108.2, "SCH 40": 102.3, "SCH 80": 97.2 },
+            "DN150 (6 in)":  { "SCH 10": 161.5, "SCH 40": 154.1, "SCH 80": 146.3 },
+            "DN200 (8 in)":  { "SCH 10": 211.6, "SCH 40": 202.7, "SCH 80": 193.7 },
+            "DN250 (10 in)": { "SCH 10": 264.7, "SCH 40": 254.5, "SCH 80": 242.9 },
+            "DN300 (12 in)": { "SCH 10": 314.7, "SCH 40": 303.2, "SCH 80": 288.9 },
+            "DN350 (14 in)": { "SCH 10": 346.1, "SCH 40": 333.4, "SCH 80": 317.5 },
+            "DN400 (16 in)": { "SCH 10": 396.8, "SCH 40": 381.0, "SCH 80": 363.5 },
+            "DN500 (20 in)": { "SCH 10": 496.9, "SCH 40": 477.9, "SCH 80": 455.6 },
+            "DN600 (24 in)": { "SCH 10": 596.9, "SCH 40": 574.7, "SCH 80": 547.7 }
+        };
+
+        const MATERIAL_ROUGHNESS = {
+            "Stainless Steel (316)": 0.015,
+            "Carbon Steel (New)": 0.045,
+            "Carbon Steel (Corroded)": 0.250,
+            "HDPE / PFA / Plastic": 0.007,
+            "Rubber Lined Steel": 0.030,
+            "Ductile Iron": 0.120
+        };
+
+        const FITTING_TYPES = {
+            "90° Standard Elbow": 0.75,
+            "90° Long Radius Elbow": 0.45,
+            "45° Standard Elbow": 0.35,
+            "Concentric Reducer (Contraction)": 0.0, // Dynamic K via beta
+            "Sudden Contraction": 0.0,               // Dynamic K via beta
+            "Gradual Expansion (Increaser)": 0.0,    // Dynamic K via beta
+            "Sudden Enlargement": 0.0,               // Dynamic K via beta
+            "Expansion Bellows (Corrugated)": 0.30,
+            "Gate Valve (Fully Open)": 0.15,
+            "Ball Valve (Fully Open)": 0.08,
+            "Butterfly Valve (Fully Open)": 0.60,
+            "Globe Valve (Fully Open)": 6.00,
+            "Diaphragm Valve (Open)": 2.30,
+            "Check Valve (Swing)": 2.00,
+            "Check Valve (Tilting Disc)": 1.20,
+            "Foot Valve with Strainer": 3.50,
+            "Y-Strainer (Clean)": 1.50,
+            "Tee (Flow through Run)": 0.40,
+            "Tee (Flow through Branch)": 1.30,
+            "Tank Entrance (Flush)": 0.50,
+            "Tank Entrance (Projecting)": 0.80,
+            "Tank Exit (Submerged Discharge)": 1.00
+        };
+
+        const DUAL_SIZE_TYPES = [
+            "Concentric Reducer (Contraction)",
+            "Sudden Contraction",
+            "Gradual Expansion (Increaser)",
+            "Sudden Enlargement"
+        ];
+
+        class AppController {
+            constructor() {
+                this.pyodide = null;
+                this.currentTab = 'suction';
+                this.unitSystem = 'metric';
+                this.chartInstance = null;
+                this.simData = null;
+
+                this.suctionLines = [
+                    { id: 101, tag: "Suction Header Pipe", nps: "DN150 (6 in)", sched: "SCH 40", material: "Stainless Steel (316)", length: 8.0 }
+                ];
+                this.suctionFittings = [
+                    { id: 201, tag: "Tank Nozzle Entrance", type: "Tank Entrance (Flush)", nps1: "DN150 (6 in)", nps2: "DN150 (6 in)", sched: "SCH 40", qty: 1 },
+                    { id: 202, tag: "Suction Isolation Valve", type: "Gate Valve (Fully Open)", nps1: "DN150 (6 in)", nps2: "DN150 (6 in)", sched: "SCH 40", qty: 1 },
+                    { id: 203, tag: "Suction Bellows", type: "Expansion Bellows (Corrugated)", nps1: "DN150 (6 in)", nps2: "DN150 (6 in)", sched: "SCH 40", qty: 1 },
+                    { id: 204, tag: "Pump Suction Reducer", type: "Concentric Reducer (Contraction)", nps1: "DN150 (6 in)", nps2: "DN100 (4 in)", sched: "SCH 40", qty: 1 }
+                ];
+
+                this.dischargeLines = [
+                    { id: 301, tag: "Pump Discharge Riser", nps: "DN100 (4 in)", sched: "SCH 40", material: "Stainless Steel (316)", length: 28.0 },
+                    { id: 302, tag: "Main Transfer Header", nps: "DN150 (6 in)", sched: "SCH 40", material: "Stainless Steel (316)", length: 45.0 }
+                ];
+                this.dischargeFittings = [
+                    { id: 401, tag: "Discharge Expander", type: "Gradual Expansion (Increaser)", nps1: "DN80 (3 in)", nps2: "DN100 (4 in)", sched: "SCH 40", qty: 1 },
+                    { id: 402, tag: "Non-Return Valve", type: "Check Valve (Swing)", nps1: "DN100 (4 in)", nps2: "DN100 (4 in)", sched: "SCH 40", qty: 1 },
+                    { id: 403, tag: "Riser Elbows", type: "90° Standard Elbow", nps1: "DN100 (4 in)", nps2: "DN100 (4 in)", sched: "SCH 40", qty: 4 },
+                    { id: 404, tag: "Header Enlargement", type: "Gradual Expansion (Increaser)", nps1: "DN100 (4 in)", nps2: "DN150 (6 in)", sched: "SCH 40", qty: 1 },
+                    { id: 405, tag: "Tank Discharge Exit", type: "Tank Exit (Submerged Discharge)", nps1: "DN150 (6 in)", nps2: "DN150 (6 in)", sched: "SCH 40", qty: 1 }
+                ];
+            }
+
+            async initPyodide() {
+                const status = document.getElementById('pyodideStatus');
+                try {
+                    status.innerText = "Downloading CPython WebAssembly runtime...";
+                    this.pyodide = await loadPyodide();
+                    
+                    status.innerText = "Loading NumPy and SciPy numerical engines...";
+                    await this.pyodide.loadPackage(["numpy", "scipy"]);
+                    
+                    status.innerText = "Compiling Colebrook-White solvers...";
+                    const pythonCode = document.getElementById('python_engine').textContent;
+                    await this.pyodide.runPythonAsync(pythonCode);
+
+                    const loader = document.getElementById('pyodideLoader');
+                    loader.classList.add('opacity-0', 'pointer-events-none');
+                    setTimeout(() => loader.remove(), 350);
+
+                    await this.recalculate();
+                } catch (err) {
+                    console.error("Pyodide bootstrap failed:", err);
+                    status.innerText = "Error loading SciPy engine. Check console.";
+                    status.classList.add('text-red-400');
+                }
+            }
+
+            switchTab(tab) {
+                this.currentTab = tab;
+                const suctionBtn = document.getElementById('tabBtnSuction');
+                const dischargeBtn = document.getElementById('tabBtnDischarge');
+                const plotBtn = document.getElementById('tabBtnPlot');
+                const linesContent = document.getElementById('tabContentLines');
+                const plotContent = document.getElementById('tabContentPlot');
+
+                suctionBtn.className = "px-5 py-2.5 font-semibold text-sm border-b-2 transition " + (tab === 'suction' ? "border-blue-500 text-blue-400 bg-slate-800/60 rounded-t-lg" : "border-transparent text-slate-400 hover:text-slate-200");
+                dischargeBtn.className = "px-5 py-2.5 font-semibold text-sm border-b-2 transition " + (tab === 'discharge' ? "border-blue-500 text-blue-400 bg-slate-800/60 rounded-t-lg" : "border-transparent text-slate-400 hover:text-slate-200");
+                plotBtn.className = "px-5 py-2.5 font-semibold text-sm border-b-2 transition " + (tab === 'plot' ? "border-blue-500 text-blue-400 bg-slate-800/60 rounded-t-lg" : "border-transparent text-slate-400 hover:text-slate-200");
+
+                if (tab === 'plot') {
+                    linesContent.classList.add('hidden');
+                    plotContent.classList.remove('hidden');
+                    this.renderChart();
+                } else {
+                    linesContent.classList.remove('hidden');
+                    plotContent.classList.add('hidden');
+                    document.getElementById('lineTitle').innerText = tab === 'suction' ? "Suction Line Pipe Segments" : "Discharge Line Pipe Segments";
+                    document.getElementById('fittingTitle').innerText = tab === 'suction' ? "Suction Line Fittings, Valves, Reducers & Bellows" : "Discharge Line Fittings, Valves, Reducers & Bellows";
+                    this.renderTables();
+                }
+            }
+
+            toggleUnits() {
+                const prevSystem = this.unitSystem;
+                this.unitSystem = document.getElementById('unitSystem').value;
+                const flowUnit = this.unitSystem === 'metric' ? 'm³/h' : 'GPM';
+                const headUnit = this.unitSystem === 'metric' ? 'm' : 'ft';
+
+                document.querySelectorAll('.flowUnitLabel').forEach(el => el.innerText = flowUnit);
+                document.querySelectorAll('.headUnitLabel').forEach(el => el.innerText = headUnit);
+                document.getElementById('plotUnitSubtitle').innerText = `Flow: ${flowUnit} | Head: ${headUnit}`;
+                
+                // Convert existing flow input boxes cleanly between m3/h and GPM
+                const qMin = document.getElementById('qMin');
+                const qMax = document.getElementById('qMax');
+                const qDesign = document.getElementById('qDesign');
+                if (prevSystem !== this.unitSystem) {
+                    const factor = this.unitSystem === 'imperial' ? 4.40287 : (1.0 / 4.40287);
+                    qMin.value = Math.round(parseFloat(qMin.value || 0) * factor);
+                    qMax.value = Math.round(parseFloat(qMax.value || 150) * factor);
+                    qDesign.value = Math.round(parseFloat(qDesign.value || 100) * factor);
+                }
+                this.recalculate();
+            }
+
+            updateFluidPreset() {
+                const preset = document.getElementById('fluidPreset').value;
+                const d = document.getElementById('fluidDensity');
+                const v = document.getElementById('fluidViscosity');
+                const p = document.getElementById('vaporPressure');
+
+                if (preset === 'water20') { d.value = 998.2; v.value = 1.002; p.value = 2.34; }
+                else if (preset === 'water60') { d.value = 983.2; v.value = 0.467; p.value = 19.94; }
+                else if (preset === 'acid98') { d.value = 1830.0; v.value = 22.5; p.value = 0.10; }
+                else if (preset === 'oil_iso46') { d.value = 875.0; v.value = 40.2; p.value = 0.05; }
+                this.recalculate();
+            }
+
+            getActiveLines() { return this.currentTab === 'suction' ? this.suctionLines : this.dischargeLines; }
+            getActiveFittings() { return this.currentTab === 'suction' ? this.suctionFittings : this.dischargeFittings; }
+
+            addSegment() {
+                const lines = this.getActiveLines();
+                lines.push({
+                    id: Date.now(),
+                    tag: `Pipe Segment ${lines.length + 1}`,
+                    nps: "DN100 (4 in)",
+                    sched: "SCH 40",
+                    material: "Stainless Steel (316)",
+                    length: 10.0
+                });
+                this.recalculate();
+            }
+
+            removeSegment(id) {
+                if (this.currentTab === 'suction') {
+                    this.suctionLines = this.suctionLines.filter(l => l.id !== id);
+                } else {
+                    this.dischargeLines = this.dischargeLines.filter(l => l.id !== id);
+                }
+                this.recalculate();
+            }
+
+            addFitting() {
+                const fittings = this.getActiveFittings();
+                fittings.push({
+                    id: Date.now(),
+                    tag: `Fitting ${fittings.length + 1}`,
+                    type: "90° Standard Elbow",
+                    nps1: "DN100 (4 in)",
+                    nps2: "DN100 (4 in)",
+                    sched: "SCH 40",
+                    qty: 1
+                });
+                this.recalculate();
+            }
+
+            removeFitting(id) {
+                if (this.currentTab === 'suction') {
+                    this.suctionFittings = this.suctionFittings.filter(f => f.id !== id);
+                } else {
+                    this.dischargeFittings = this.dischargeFittings.filter(f => f.id !== id);
+                }
+                this.recalculate();
+            }
+
+            updateItem(category, id, field, val) {
+                const arr = category === 'segment' ? this.getActiveLines() : this.getActiveFittings();
+                const item = arr.find(x => x.id === id);
+                if (!item) return;
+
+                // Strictly cast only numerical fields to avoid corrupting string keys
+                if (field === 'length') {
+                    item[field] = Math.max(0.01, parseFloat(val) || 0.1);
+                } else if (field === 'qty') {
+                    item[field] = Math.max(1, parseInt(val, 10) || 1);
+                } else {
+                    item[field] = val;
+                }
+
+                // Keep nps2 synchronized with nps1 for single-diameter fittings
+                if (category === 'fitting' && !DUAL_SIZE_TYPES.includes(item.type)) {
+                    item.nps2 = item.nps1;
+                }
+
+                this.recalculate();
+            }
+
+            renderTables() {
+                if (this.currentTab === 'plot') return;
+
+                const lines = this.getActiveLines();
+                const fittings = this.getActiveFittings();
+                const headFactor = this.unitSystem === 'metric' ? 1.0 : 3.28084;
+
+                // Grab computed results at Design Flow
+                const segResList = this.simData ? (this.currentTab === 'suction' ? this.simData.design.suction_seg_res : this.simData.design.discharge_seg_res) : [];
+                const fitResList = this.simData ? (this.currentTab === 'suction' ? this.simData.design.suction_fit_res : this.simData.design.discharge_fit_res) : [];
+
+                // 1. Render Pipe Segments Table
+                let segHTML = '';
+                lines.forEach(l => {
+                    const npsOpts = Object.keys(PIPE_SCHEDULES).map(s => `<option value="${s}" ${l.nps === s ? 'selected' : ''}>${s}</option>`).join('');
+                    const schOpts = Object.keys(PIPE_SCHEDULES[l.nps] || PIPE_SCHEDULES["DN100 (4 in)"]).map(s => `<option value="${s}" ${l.sched === s ? 'selected' : ''}>${s}</option>`).join('');
+                    const matOpts = Object.keys(MATERIAL_ROUGHNESS).map(m => `<option value="${m}" ${l.material === m ? 'selected' : ''}>${m}</option>`).join('');
+
+                    const res = segResList.find(r => r.id === l.id);
+                    const idStr = res ? res.id_mm.toFixed(1) : '—';
+                    const velStr = res ? res.vel.toFixed(2) : '—';
+                    const fStr = res ? res.f.toFixed(4) : '—';
+                    const lossStr = res ? (res.loss * headFactor).toFixed(3) : '—';
+
+                    segHTML += `
+                        <tr class="hover:bg-slate-800/60 transition">
+                            <td class="p-2"><input type="text" value="${l.tag}" onchange="app.updateItem('segment', ${l.id}, 'tag', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 w-full text-slate-200"></td>
+                            <td class="p-2"><select onchange="app.updateItem('segment', ${l.id}, 'nps', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 w-full">${npsOpts}</select></td>
+                            <td class="p-2"><select onchange="app.updateItem('segment', ${l.id}, 'sched', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 w-full">${schOpts}</select></td>
+                            <td class="p-2"><select onchange="app.updateItem('segment', ${l.id}, 'material', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 w-full">${matOpts}</select></td>
+                            <td class="p-2"><input type="number" value="${l.length}" step="0.5" min="0.1" onchange="app.updateItem('segment', ${l.id}, 'length', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 w-20 text-slate-200 text-center"></td>
+                            <td class="p-2 text-right text-slate-400">${idStr}</td>
+                            <td class="p-2 text-right text-slate-300">${velStr}</td>
+                            <td class="p-2 text-right text-slate-400">${fStr}</td>
+                            <td class="p-2 text-right font-bold text-blue-300 bg-blue-950/20">${lossStr}</td>
+                            <td class="p-2 text-center"><button onclick="app.removeSegment(${l.id})" class="text-rose-400 hover:text-rose-300 font-bold px-2 py-1">✕</button></td>
+                        </tr>
+                    `;
+                });
+                document.getElementById('segmentTableBody').innerHTML = segHTML || `<tr><td colspan="10" class="p-4 text-center text-slate-500 italic">No pipe segments defined.</td></tr>`;
+
+                // 2. Render Fittings & Reducers Table
+                let fitHTML = '';
+                fittings.forEach(f => {
+                    const isDualSize = DUAL_SIZE_TYPES.includes(f.type);
+                    const typeOpts = Object.keys(FITTING_TYPES).map(t => `<option value="${t}" ${f.type === t ? 'selected' : ''}>${t}</option>`).join('');
+                    const nps1Opts = Object.keys(PIPE_SCHEDULES).map(s => `<option value="${s}" ${f.nps1 === s ? 'selected' : ''}>${s}</option>`).join('');
+                    const nps2Opts = Object.keys(PIPE_SCHEDULES).map(s => `<option value="${s}" ${f.nps2 === s ? 'selected' : ''}>${s}</option>`).join('');
+                    const schOpts = Object.keys(PIPE_SCHEDULES[f.nps1] || PIPE_SCHEDULES["DN100 (4 in)"]).map(s => `<option value="${s}" ${f.sched === s ? 'selected' : ''}>${s}</option>`).join('');
+
+                    const res = fitResList.find(r => r.id === f.id);
+                    const velStr = res ? res.vel.toFixed(2) : '—';
+                    const kStr = res ? res.K_total.toFixed(3) : '—';
+                    const lossStr = res ? (res.loss * headFactor).toFixed(3) : '—';
+
+                    const nps2Cell = isDualSize
+                        ? `<select onchange="app.updateItem('fitting', ${f.id}, 'nps2', this.value)" class="bg-slate-900 border border-purple-500/70 rounded px-2 py-1 text-purple-200 w-full">${nps2Opts}</select>`
+                        : `<span class="text-slate-500 px-2 py-1 block text-center">— (Same)</span>`;
+
+                    fitHTML += `
+                        <tr class="hover:bg-slate-800/60 transition">
+                            <td class="p-2"><input type="text" value="${f.tag}" onchange="app.updateItem('fitting', ${f.id}, 'tag', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 w-full text-slate-200"></td>
+                            <td class="p-2"><select onchange="app.updateItem('fitting', ${f.id}, 'type', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 w-full">${typeOpts}</select></td>
+                            <td class="p-2"><select onchange="app.updateItem('fitting', ${f.id}, 'nps1', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 w-full">${nps1Opts}</select></td>
+                            <td class="p-2">${nps2Cell}</td>
+                            <td class="p-2"><select onchange="app.updateItem('fitting', ${f.id}, 'sched', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 w-full">${schOpts}</select></td>
+                            <td class="p-2 text-center"><input type="number" value="${f.qty}" min="1" step="1" onchange="app.updateItem('fitting', ${f.id}, 'qty', this.value)" class="bg-slate-900 border border-slate-700 rounded px-2 py-1 w-14 text-slate-200 text-center"></td>
+                            <td class="p-2 text-right text-slate-300">${velStr}</td>
+                            <td class="p-2 text-right text-slate-400">${kStr}</td>
+                            <td class="p-2 text-right font-bold text-purple-300 bg-purple-950/20">${lossStr}</td>
+                            <td class="p-2 text-center"><button onclick="app.removeFitting(${f.id})" class="text-rose-400 hover:text-rose-300 font-bold px-2 py-1">✕</button></td>
+                        </tr>
+                    `;
+                });
+                document.getElementById('fittingTableBody').innerHTML = fitHTML || `<tr><td colspan="10" class="p-4 text-center text-slate-500 italic">No fittings defined.</td></tr>`;
+            }
+
+            async recalculate() {
+                if (!this.pyodide) return;
+
+                let qMin = parseFloat(document.getElementById('qMin').value) || 0;
+                let qMax = parseFloat(document.getElementById('qMax').value) || 150;
+                let qDesign = parseFloat(document.getElementById('qDesign').value) || 100;
+                let qSteps = Math.max(2, parseInt(document.getElementById('qSteps').value) || 16);
+
+                if (this.unitSystem === 'imperial') {
+                    qMin = qMin * 0.227124;
+                    qMax = qMax * 0.227124;
+                    qDesign = qDesign * 0.227124;
+                }
+
+                const payload = {
+                    fluid: {
+                        density: parseFloat(document.getElementById('fluidDensity').value) || 998.2,
+                        viscosity_cp: parseFloat(document.getElementById('fluidViscosity').value) || 1.002,
+                        vap_kpa: parseFloat(document.getElementById('vaporPressure').value) || 2.34,
+                        atm_kpa: parseFloat(document.getElementById('atmPressure').value) || 101.3
+                    },
+                    q_min: qMin,
+                    q_max: qMax,
+                    q_design: qDesign,
+                    q_steps: qSteps,
+                    suction_elevation: parseFloat(document.getElementById('suctionElevation').value) || 0,
+                    discharge_elevation: parseFloat(document.getElementById('dischargeElevation').value) || 0,
+                    suction_lines: this.suctionLines.map(l => ({
+                        id: l.id,
+                        tag: l.tag,
+                        id_mm: PIPE_SCHEDULES[l.nps]?.[l.sched] || 102.3,
+                        roughness_mm: MATERIAL_ROUGHNESS[l.material] || 0.045,
+                        length_m: parseFloat(l.length) || 1.0
+                    })),
+                    suction_fittings: this.suctionFittings.map(f => ({
+                        id: f.id,
+                        tag: f.tag,
+                        type: f.type,
+                        id1_mm: PIPE_SCHEDULES[f.nps1]?.[f.sched] || 102.3,
+                        id2_mm: PIPE_SCHEDULES[f.nps2]?.[f.sched] || 102.3,
+                        base_K: FITTING_TYPES[f.type] ?? 0.5,
+                        qty: parseInt(f.qty, 10) || 1
+                    })),
+                    discharge_lines: this.dischargeLines.map(l => ({
+                        id: l.id,
+                        tag: l.tag,
+                        id_mm: PIPE_SCHEDULES[l.nps]?.[l.sched] || 102.3,
+                        roughness_mm: MATERIAL_ROUGHNESS[l.material] || 0.045,
+                        length_m: parseFloat(l.length) || 1.0
+                    })),
+                    discharge_fittings: this.dischargeFittings.map(f => ({
+                        id: f.id,
+                        tag: f.tag,
+                        type: f.type,
+                        id1_mm: PIPE_SCHEDULES[f.nps1]?.[f.sched] || 102.3,
+                        id2_mm: PIPE_SCHEDULES[f.nps2]?.[f.sched] || 102.3,
+                        base_K: FITTING_TYPES[f.type] ?? 0.5,
+                        qty: parseInt(f.qty, 10) || 1
+                    }))
+                };
+
+                try {
+                    const jsonResult = await this.pyodide.globals.get('run_simulation')(JSON.stringify(payload));
+                    this.simData = JSON.parse(jsonResult);
+                    this.renderSummaryAndBreakdowns();
+                    this.renderTables();
+                    if (this.currentTab === 'plot') {
+                        this.renderChart();
+                    }
+                } catch (e) {
+                    console.error("Simulation run error in SciPy:", e);
+                }
+            }
+
+            renderSummaryAndBreakdowns() {
+                if (!this.simData) return;
+
+                const dPt = this.simData.design;
+                const flowFactor = this.unitSystem === 'metric' ? 1.0 : 4.40287;
+                const headFactor = this.unitSystem === 'metric' ? 1.0 : 3.28084;
+                const flowUnit = this.unitSystem === 'metric' ? 'm³/h' : 'GPM';
+                const headUnit = this.unitSystem === 'metric' ? 'm' : 'ft';
+
+                const designFlowDisp = `${(dPt.q_m3h * flowFactor).toFixed(1)} ${flowUnit}`;
+                document.querySelectorAll('.designFlowReadout').forEach(el => el.innerText = designFlowDisp);
+
+                document.getElementById('suctionLossBadge').innerText = `${(dPt.suction_loss * headFactor).toFixed(2)} ${headUnit}`;
+                document.getElementById('dischargeLossBadge').innerText = `${(dPt.discharge_loss * headFactor).toFixed(2)} ${headUnit}`;
+
+                const maxSuctionVel = dPt.max_suction_vel.toFixed(2);
+                const velNotice = dPt.max_suction_vel > 1.8 ?
+                    `<span class="text-amber-400 font-semibold">⚠️ Suction Vel High (${maxSuctionVel} m/s > 1.8 m/s limit)</span>` :
+                    `<span class="text-emerald-400 font-semibold">✓ Suction Vel Optimal (${maxSuctionVel} m/s)</span>`;
+
+                document.getElementById('summaryResults').innerHTML = `
+                    <div class="flex justify-between border-b border-slate-700/60 pb-1.5"><span>Design Flow (Q):</span><strong class="text-blue-300 font-mono">${designFlowDisp}</strong></div>
+                    <div class="flex justify-between border-b border-slate-700/60 pb-1.5"><span>Total Dynamic Head (TDH):</span><strong class="text-blue-300 font-mono">${(dPt.tdh * headFactor).toFixed(2)} ${headUnit}</strong></div>
+                    <div class="flex justify-between border-b border-slate-700/60 pb-1.5"><span>Static Lift Head:</span><strong class="text-slate-200 font-mono">${(dPt.static_head * headFactor).toFixed(2)} ${headUnit}</strong></div>
+                    <div class="flex justify-between border-b border-slate-700/60 pb-1.5"><span>Suction Line Losses:</span><strong class="text-slate-300 font-mono">${(dPt.suction_loss * headFactor).toFixed(2)} ${headUnit}</strong></div>
+                    <div class="flex justify-between border-b border-slate-700/60 pb-1.5"><span>Discharge Line Losses:</span><strong class="text-slate-300 font-mono">${(dPt.discharge_loss * headFactor).toFixed(2)} ${headUnit}</strong></div>
+                    <div class="flex justify-between border-b border-slate-700/60 pb-1.5"><span>NPSH Available (NPSHa):</span><strong class="text-emerald-400 font-mono">${(dPt.npsha * headFactor).toFixed(2)} ${headUnit}</strong></div>
+                    <div class="pt-1 text-xs">${velNotice}</div>
+                `;
+
+                // Full Breakdown Table on Tab 3
+                let breakdownHTML = '';
+                dPt.breakdown.forEach(row => {
+                    const fkVal = row.f !== null ? `f = ${row.f.toFixed(4)}` : `K = ${row.K_total.toFixed(3)}`;
+                    breakdownHTML += `
+                        <tr class="hover:bg-slate-700/30 transition">
+                            <td class="p-2.5 text-slate-400">${row.section}</td>
+                            <td class="p-2.5 font-medium text-slate-200">${row.component}</td>
+                            <td class="p-2.5 text-right">${row.id_mm.toFixed(1)}</td>
+                            <td class="p-2.5 text-right">${row.vel.toFixed(2)}</td>
+                            <td class="p-2.5 text-right">${row.Re !== null ? row.Re.toFixed(0) : '—'}</td>
+                            <td class="p-2.5 text-right">${fkVal}</td>
+                            <td class="p-2.5 text-right">${(row.major * headFactor).toFixed(3)}</td>
+                            <td class="p-2.5 text-right">${(row.minor * headFactor).toFixed(3)}</td>
+                            <td class="p-2.5 text-right font-bold text-emerald-300">${(row.loss * headFactor).toFixed(3)}</td>
+                        </tr>
+                    `;
+                });
+                document.getElementById('breakdownTableBody').innerHTML = breakdownHTML;
+            }
+
+            renderChart() {
+                if (!this.simData) return;
+
+                const curve = this.simData.curve;
+                const dPt = this.simData.design;
+                const flowFactor = this.unitSystem === 'metric' ? 1.0 : 4.40287;
+                const headFactor = this.unitSystem === 'metric' ? 1.0 : 3.28084;
+                const flowUnit = this.unitSystem === 'metric' ? 'm³/h' : 'GPM';
+                const headUnit = this.unitSystem === 'metric' ? 'm' : 'ft';
+
+                const tdhPts = curve.map(d => ({ x: d.q_m3h * flowFactor, y: d.tdh * headFactor }));
+                const frictionPts = curve.map(d => ({ x: d.q_m3h * flowFactor, y: d.friction_loss * headFactor }));
+                const staticPts = curve.map(d => ({ x: d.q_m3h * flowFactor, y: d.static_head * headFactor }));
+                const dutyMarker = [{ x: dPt.q_m3h * flowFactor, y: dPt.tdh * headFactor }];
+
+                const ctx = document.getElementById('systemCurveChart').getContext('2d');
+                if (this.chartInstance) {
+                    this.chartInstance.destroy();
+                }
+
+                this.chartInstance = new Chart(ctx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [
+                            {
+                                label: `Design Duty Point (${(dPt.q_m3h * flowFactor).toFixed(1)} ${flowUnit}, ${(dPt.tdh * headFactor).toFixed(2)} ${headUnit})`,
+                                data: dutyMarker,
+                                backgroundColor: '#f59e0b',
+                                borderColor: '#ffffff',
+                                borderWidth: 2,
+                                pointRadius: 7,
+                                pointHoverRadius: 9,
+                                showLine: false
+                            },
+                            {
+                                label: `Total Dynamic Head (${headUnit})`,
+                                data: tdhPts,
+                                borderColor: '#38bdf8',
+                                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                                borderWidth: 3,
+                                showLine: true,
+                                fill: true,
+                                tension: 0.25
+                            },
+                            {
+                                label: `Total Friction & Minor Losses (${headUnit})`,
+                                data: frictionPts,
+                                borderColor: '#c084fc',
+                                borderWidth: 2,
+                                borderDash: [5, 5],
+                                showLine: true,
+                                tension: 0.25
+                            },
+                            {
+                                label: `Static Head (${headUnit})`,
+                                data: staticPts,
+                                borderColor: '#34d399',
+                                borderWidth: 2,
+                                borderDash: [2, 2],
+                                showLine: true,
+                                tension: 0
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#cbd5e1', font: { size: 12 } } },
+                            tooltip: { mode: 'nearest', intersect: false }
+                        },
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                title: { display: true, text: `Flow Rate (${flowUnit})`, color: '#94a3b8' },
+                                grid: { color: 'rgba(51, 65, 85, 0.4)' },
+                                ticks: { color: '#94a3b8' }
+                            },
+                            y: {
+                                title: { display: true, text: `Head (${headUnit})`, color: '#94a3b8' },
+                                grid: { color: 'rgba(51, 65, 85, 0.4)' },
+                                ticks: { color: '#94a3b8' },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+
+            exportToExcel() {
+                if (!this.simData) return;
+
+                const flowFactor = this.unitSystem === 'metric' ? 1.0 : 4.40287;
+                const headFactor = this.unitSystem === 'metric' ? 1.0 : 3.28084;
+                const flowUnit = this.unitSystem === 'metric' ? 'm3/h' : 'GPM';
+                const headUnit = this.unitSystem === 'metric' ? 'm' : 'ft';
+
+                const curveData = this.simData.curve.map(d => ({
+                    [`Flow Rate (${flowUnit})`]: parseFloat((d.q_m3h * flowFactor).toFixed(2)),
+                    [`Total Dynamic Head (${headUnit})`]: parseFloat((d.tdh * headFactor).toFixed(3)),
+                    [`Static Head (${headUnit})`]: parseFloat((d.static_head * headFactor).toFixed(3)),
+                    [`Suction Line Loss (${headUnit})`]: parseFloat((d.suction_loss * headFactor).toFixed(3)),
+                    [`Discharge Line Loss (${headUnit})`]: parseFloat((d.discharge_loss * headFactor).toFixed(3)),
+                    [`Total Friction & Minor Losses (${headUnit})`]: parseFloat((d.friction_loss * headFactor).toFixed(3)),
+                    [`NPSHa (${headUnit})`]: parseFloat((d.npsha * headFactor).toFixed(3)),
+                    "Max Suction Velocity (m/s)": parseFloat(d.max_suction_vel.toFixed(3))
+                }));
+
+                const dPt = this.simData.design;
+                const breakdownData = dPt.breakdown.map(r => ({
+                    "Section": r.section,
+                    "Component Description": r.component,
+                    "Reference ID (mm)": parseFloat(r.id_mm.toFixed(2)),
+                    "Velocity (m/s)": parseFloat(r.vel.toFixed(3)),
+                    "Reynolds Number (Re)": r.Re !== null ? parseFloat(r.Re.toFixed(0)) : "—",
+                    "Friction Factor (f)": r.f !== null ? parseFloat(r.f.toFixed(5)) : "—",
+                    "Total K Factor": r.K_total !== null ? parseFloat(r.K_total.toFixed(4)) : "—",
+                    [`Major Loss (${headUnit})`]: parseFloat((r.major * headFactor).toFixed(4)),
+                    [`Minor Loss (${headUnit})`]: parseFloat((r.minor * headFactor).toFixed(4)),
+                    [`Total Component Head Loss (${headUnit})`]: parseFloat((r.loss * headFactor).toFixed(4))
+                }));
+
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(curveData), "System Curve Table");
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(breakdownData), "Design Point Breakdown");
+
+                XLSX.writeFile(wb, "HydroCurve_SciPy_Calculation_Report.xlsx");
+            }
+        }
+
+        const app = new AppController();
+        window.addEventListener('DOMContentLoaded', () => app.initPyodide());
+    </script>
+</body>
+</html>
